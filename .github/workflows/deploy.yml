@@ -1,13 +1,33 @@
-version: '3.8'
+name: Deploy API Spreadsheet to JSON
 
-services:
-  spreadsheet-api:
-    build: .
-    container_name: spreadsheet-api
-    ports:
-      - "8082:8082"
-    environment:
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - ./app:/app/app
-    restart: unless-stopped
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Deploy via SSH na OCI
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USER }}
+        key: ${{ secrets.SSH_KEY }}
+        port: 22
+        script: |
+          # 1. Entra na pasta específica da segunda API no servidor
+          cd /home/${{ secrets.SSH_USER }}/apps/fini/spreadsheet-to-json
+          
+          # 2. Atualiza o código
+          git checkout main
+          git pull origin main
+          
+          # 3. Reinicia apenas este container
+          docker compose down
+          docker compose up -d --build
+          
+          # 4. Limpa imagens antigas
+          docker image prune -f
