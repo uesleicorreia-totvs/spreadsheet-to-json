@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  spreadsheet-api:
+    build: .
+    container_name: spreadsheet-api
+    ports:
+      - "8082:8082"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./app:/app/app
+    restart: unless-stopped
