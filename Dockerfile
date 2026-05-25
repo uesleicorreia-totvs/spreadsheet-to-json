@@ -15,7 +15,7 @@ COPY api.py .
 COPY services.py .
 
 # Expor porta
-EXPOSE 8000
+EXPOSE 8082
 
 # Comando para iniciar a aplicação
 CMD ["python", "api.py"]
