@@ -132,6 +132,8 @@ def process_excel_data(file_path):
             'cod_emissor': str(cod_emissor)
         })
     
+    result['total_itens'] = len(result['itens'])     
+    
     return result
 
 
