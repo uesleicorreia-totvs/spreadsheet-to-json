@@ -4,7 +4,15 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import os
 import tempfile
+import logging
 from services import process_excel_data, merge_notas_descargas, download_excel_from_url, delete_file
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Descarga API", version="1.0.0")
 
@@ -29,9 +37,11 @@ async def get_descargas_mescladas(data: dict):
     """
     try:
         if not data:
+            logger.warning(f"Status 400 error: Payload JSON não fornecido ou inválido")
             raise HTTPException(status_code=400, detail="Payload JSON não fornecido ou inválido")
 
         if 'notas' not in data or 'itens' not in data:
+            logger.warning(f'Status 400 error: O JSON deve conter as chaves "notas" e "itens"')
             raise HTTPException(
                 status_code=400,
                 detail='O JSON deve conter as chaves "notas" e "itens"'
@@ -41,9 +51,11 @@ async def get_descargas_mescladas(data: dict):
 
         return JSONResponse(content=mesclado, status_code=200)
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
         raise
     except Exception as e:
+        logger.error(f"Status 500 error: Erro ao processar dados: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao processar dados: {str(e)}")
 
 
@@ -62,8 +74,10 @@ async def get_descargas_get():
         default_file = 'Base - Descarga Automática 2204.xlsx'
         if os.path.exists(default_file):
             data = process_excel_data(default_file)
+            logger.info(f"Arquivo padrão processado com sucesso: {default_file}")
             return JSONResponse(content=data, status_code=200)
         else:
+            logger.warning(f"Status 404 error: Arquivo padrão não encontrado. {default_file}")
             raise HTTPException(
                 status_code=404,
                 detail={
@@ -71,9 +85,11 @@ async def get_descargas_get():
                     'expectedFile': default_file
                 }
             )
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
         raise
     except Exception as e:
+        logger.error(f"Status 500 error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -90,9 +106,11 @@ async def get_descargas_post(file: UploadFile = File(...)):
     """
     try:
         if not file:
+            logger.warning("Status 400 error: Nenhum arquivo enviado")
             raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
         
         if file.filename == '':
+            logger.warning("Status 400 error: Arquivo sem nome")
             raise HTTPException(status_code=400, detail="Arquivo sem nome")
 
         with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp:
@@ -102,14 +120,17 @@ async def get_descargas_post(file: UploadFile = File(...)):
         
         try:
             data = process_excel_data(tmp_path)
+            logger.info(f"Arquivo {file.filename} processado com sucesso")
             return JSONResponse(content=data, status_code=200)
         finally:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
     
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
         raise
     except Exception as e:
+        logger.error(f"Status 500 error: Erro ao processar arquivo: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -131,22 +152,27 @@ async def get_descargas_from_url(request: URLDownloadRequest):
     """
     try:
         if not request.url or request.url.strip() == '':
+            logger.warning("Status 400 error: URL não fornecida ou inválida")
             raise HTTPException(status_code=400, detail="URL não fornecida ou inválida")
         
         # Baixar arquivo da URL
         tmp_path = download_excel_from_url(request.url)
+        logger.info(f"Arquivo baixado da URL com sucesso")
         
         try:
             # Processar dados do arquivo
             data = process_excel_data(tmp_path)
+            logger.info(f"Arquivo da URL processado com sucesso")
             return JSONResponse(content=data, status_code=200)
         finally:
             # Garantir que o arquivo temporário seja deletado
             delete_file(tmp_path)
     
-    except HTTPException:
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
         raise
     except Exception as e:
+        logger.error(f"Status 500 error: Erro ao processar URL: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
