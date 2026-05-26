@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    - name: Checkout código
+      uses: actions/checkout@v3
+    
     - name: Deploy via SSH na OCI
       uses: appleboy/ssh-action@v1.0.3
       with:
