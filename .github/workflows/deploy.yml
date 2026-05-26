@@ -12,7 +12,10 @@ jobs:
     steps:
     - name: Checkout código
       uses: actions/checkout@v3
-    
+
+    - name: Debug - Verificar trigger
+      run: echo "Workflow disparado por push na branch main"
+
     - name: Deploy via SSH na OCI
       uses: appleboy/ssh-action@v1.0.3
       with:
@@ -21,16 +24,12 @@ jobs:
         key: ${{ secrets.SSH_KEY }}
         port: 22
         script: |
-          # 1. Entra na pasta específica da segunda API no servidor
           cd /home/${{ secrets.SSH_USER }}/apps/fini/spreadsheet-to-json
-          
-          # 2. Atualiza o código
           git checkout main
           git pull origin main
-          
-          # 3. Reinicia apenas este container
           docker compose down
           docker compose up -d --build
-          
-          # 4. Limpa imagens antigas
           docker image prune -f
+
+    - name: Deploy concluído
+      run: echo "Deploy executado com sucesso"
