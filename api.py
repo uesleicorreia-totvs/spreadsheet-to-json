@@ -1,6 +1,8 @@
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+import io
+from datetime import datetime
 from pydantic import BaseModel
 import os
 import tempfile
@@ -57,6 +59,113 @@ async def get_descargas_mescladas(data: dict):
     except Exception as e:
         logger.error(f"Status 500 error: Erro ao processar dados: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao processar dados: {str(e)}")
+
+
+@app.post("/api/descargas-mescladas-xlsx")
+async def get_descargas_mescladas_xlsx(data: dict):
+    """
+    POST: Recebe JSON com listas de 'notas' e 'descargas' e uma chave 'nome_arquivo'
+
+    Payload esperado:
+    {
+        "notas": [...],
+        "itens": [...],
+        "nome_arquivo": "arquivo_xpto"
+    }
+
+    Retorna um arquivo .xlsx contendo os registros mesclados. O nome do arquivo
+    será: <nome_arquivo>_DDMMAA_HHMM.xlsx (ex: arquivo_xpto_090626_2311.xlsx)
+    """
+    try:
+        if not data:
+            logger.warning(f"Status 400 error: Payload JSON não fornecido ou inválido")
+            raise HTTPException(status_code=400, detail="Payload JSON não fornecido ou inválido")
+
+        if 'notas' not in data or 'itens' not in data:
+            logger.warning(f'Status 400 error: O JSON deve conter as chaves "notas" e "itens"')
+            raise HTTPException(
+                status_code=400,
+                detail='O JSON deve conter as chaves "notas" e "itens"'
+            )
+
+        nome_arquivo = data.get('nome_arquivo')
+        if not nome_arquivo or str(nome_arquivo).strip() == '':
+            logger.warning('Status 400 error: nome_arquivo não fornecido ou inválido')
+            raise HTTPException(status_code=400, detail='nome_arquivo não fornecido ou inválido')
+
+        # Gerar os dados mesclados usando a função existente
+        mesclado = merge_notas_descargas(data)
+
+        # Converter para DataFrame e salvar em Excel na memória
+        import pandas as pd
+
+        df = pd.DataFrame(mesclado)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Mesclado')
+        output.seek(0)
+
+        # Calcular tamanho e Content-Range para envio via REST
+        size = output.getbuffer().nbytes
+
+        timestamp = datetime.now().strftime('%d%m%y_%H%M')
+        filename = f"{nome_arquivo}_{timestamp}.xlsx"
+
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(size),
+            'Content-Range': f'bytes 0-{max(size-1,0)}/{size}',
+            'Accept-Ranges': 'bytes'
+        }
+
+        return StreamingResponse(
+            output,
+            media_type='application/octet-stream',
+            headers=headers
+        )
+
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Status 500 error: Erro ao gerar XLSX: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar XLSX: {str(e)}")
+
+
+@app.post("/api/upload-headers")
+async def upload_and_return_headers(file: UploadFile = File(...)):
+    """
+    Recebe um arquivo via multipart/form-data e retorna em JSON
+    os headers calculados necessários para enviar o binário a outro endpoint:
+    Content-Disposition, Content-Length, Content-Range, Accept-Ranges
+    """
+    try:
+        if not file:
+            logger.warning("Status 400 error: Nenhum arquivo enviado")
+            raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
+
+        # Ler conteúdo em memória
+        content = await file.read()
+        size = len(content)
+
+        # Usar o nome original do arquivo se fornecido, caso contrário gerar um nome
+        filename = file.filename if file.filename and file.filename.strip() != '' else f"upload_{datetime.now().strftime('%d%m%y_%H%M%S')}"
+
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(size),
+            'Content-Range': f'bytes 0-{max(size-1,0)}/{size}',
+            'Accept-Ranges': 'bytes'
+        }
+
+        return JSONResponse(content=headers, status_code=200)
+
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Status 500 error: Erro ao processar upload: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar upload: {str(e)}")
 
 
 @app.get("/api/descargas")
@@ -189,6 +298,7 @@ if __name__ == '__main__':
     print("  GET  /api/descargas - Processa arquivo padrão (se existir)")
     print("  POST /api/descargas - Recebe arquivo Excel via multipart/form-data")
     print("  POST /api/descargas-mescladas - Mescla notas com descargas")
+    print("  POST /api/descargas-mescladas-xlsx - Mescla e retorna XLSX para download")
     print("  GET  /api/health - Health check")
     print("  GET  /docs - Documentação interativa (Swagger UI)")
     uvicorn.run(app, host="0.0.0.0", port=8082)
