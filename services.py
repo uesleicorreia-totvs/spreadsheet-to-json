@@ -2,6 +2,8 @@ import pandas as pd
 import requests
 import tempfile
 import os
+import io
+from datetime import datetime
 
 
 def download_excel_from_url(url: str) -> str:
@@ -72,7 +74,7 @@ def process_excel_data(file_path):
     col_vlr_cte = [col for col in df_descarga.columns if 'Valor CTe de Descarga' in col][0]
     col_cnpj = [col for col in df_descarga.columns if 'CNPJ Emissor do CTe de Origem' in col][0]
     col_cod_emissor = [col for col in df_descarga.columns if 'Cód. Emissor' in col][0]
-    
+    col_num_calculo = [col for col in df_descarga.columns if 'Nº Cálculo' in col][0]
     result = {
         'notas': [],
         'itens': []
@@ -97,7 +99,7 @@ def process_excel_data(file_path):
         })
 
     descargas_grouped = df_descarga.groupby(
-        [col_cte_descarga, col_cte_origem, col_cnpj, col_cod_emissor],
+        [col_cte_descarga, col_cte_origem, col_cnpj, col_cod_emissor, col_num_calculo, col_error],
         dropna=False
     ).agg({
         col_vlr_cte: 'sum'
@@ -123,13 +125,17 @@ def process_excel_data(file_path):
             cod_emissor = int(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
         except (ValueError, TypeError):
             cod_emissor = str(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
-        
+        try:
+            num_calculo = int(row[col_num_calculo]) if pd.notna(row[col_num_calculo]) else None
+        except (ValueError, TypeError):
+            num_calculo = str(row[col_num_calculo]) if pd.notna(row[col_num_calculo]) else None
         result['itens'].append({
             'cte_des': str(num_cte_da_des),
             'valor': str(vlr_cte),
             'cte_origem': str(cte_origem),
             'cnpj_origem': str(row[col_cnpj]) if pd.notna(row[col_cnpj]) else None,
-            'cod_emissor': str(cod_emissor)
+            'cod_emissor': str(cod_emissor),
+            'num_calculo': str(num_calculo)
         })
     
     result['total_itens'] = len(result['itens'])     
@@ -168,3 +174,121 @@ def merge_notas_descargas(data):
             resultado.append(nota)
     
     return resultado
+
+
+def format_mesclado_records(mesclado):
+    """Formata os registros mesclados para as colunas desejadas:
+
+    Colunas retornadas (ordem):
+      - Nota
+      - Cod. Emissor
+      - CNPJ
+      - CTe Origem
+      - CTe Descarga
+      - Valor
+      - Status
+      - Erro (pega detalhe_erro.error quando disponível)
+      - Num. Calculo
+
+    Recebe a lista retornada por `merge_notas_descargas` e normaliza os campos.
+    """
+    formatted = []
+    for rec in mesclado:
+        detalhe = rec.get('detalhe_erro') if isinstance(rec, dict) else None
+        erro = None
+        if isinstance(detalhe, dict):
+            # prefer key 'error' inside detalhe_erro
+            erro = detalhe.get('error') or detalhe.get('Erro')
+        elif isinstance(detalhe, str):
+            erro = detalhe
+
+        # fallbacks for common field names
+        nota = rec.get('num_nfe') or rec.get('num_nfe')
+        cod_emissor = rec.get('cod_emissor') or rec.get('codEmissor')
+        cnpj = rec.get('cnpj_origem') or rec.get('cnpj') or rec.get('cnpjOrigem')
+        cte_origem = rec.get('cte_origem') or rec.get('cteOrigem')
+        cte_des = rec.get('cte_des') or rec.get('cteDes')
+        valor = rec.get('valor')
+        try:
+            if valor is not None and str(valor) != '':
+                valor = float(valor)
+        except Exception:
+            # keep as-is (string) if it cannot be converted
+            pass
+
+        formatted.append({
+            'Nota': nota,
+            'Cod. Emissor': cod_emissor,
+            'CNPJ': cnpj,
+            'CTe Origem': cte_origem,
+            'CTe Descarga': cte_des,
+            'Valor': valor,
+            'Status': rec.get('status'),
+            'Erro': erro,
+            'Num. Calculo': rec.get('num_calculo')
+        })
+
+    return formatted
+
+
+def build_filename(nome_arquivo: str) -> str:
+    """Gera nome de arquivo com timestamp: <nome>_DDMMAA_HHMM.xlsx"""
+    timestamp = datetime.now().strftime('%d%m%y_%H%M')
+    return f"{nome_arquivo}_{timestamp}.xlsx"
+
+
+def excel_bytes_from_records(records) -> bytes:
+    """Converte uma lista de dicionários em um arquivo XLSX em bytes."""
+    df = pd.DataFrame(records)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Mesclado')
+    output.seek(0)
+    return output.getvalue()
+
+
+def generate_mesclado_and_errors(data):
+    """Retorna os registros mesclados e a lista de itens com erro.
+
+    Identifica erros quando:
+      - status == 'erro' (independente de detalhe_erro)
+      - status != 'sucesso' mas existe detalhe_erro com mensagem de erro
+    
+    Retorna error_items com campos: num_nfe, cte_origem, cod_emissor, erro
+    """
+    mesclado = merge_notas_descargas(data)
+    error_items = []
+    for rec in mesclado:
+        status = rec.get('status')
+        detalhe_erro = rec.get('detalhe_erro')
+        
+        # Verificar se há erro
+        has_error = False
+        erro_msg = ''
+        
+        # Caso 1: status = 'erro'
+        if status and isinstance(status, str) and status.lower() == 'erro':
+            has_error = True
+        
+        # Caso 2: existe detalhe_erro com mensagem de erro
+        if isinstance(detalhe_erro, dict) and detalhe_erro:
+            error_text = detalhe_erro.get('error') or detalhe_erro.get('Erro')
+            if error_text:
+                has_error = True
+                erro_msg = error_text
+        
+        # Se encontrou erro, adicionar à lista
+        if has_error:
+            # Extrair mensagem de erro do detalhe_erro se não tiver sido extraída
+            if not erro_msg and isinstance(detalhe_erro, dict):
+                erro_msg = detalhe_erro.get('error') or detalhe_erro.get('Erro') or ''
+            
+            error_record = {
+                'num_nfe': rec.get('num_nfe'),
+                'cte_origem': rec.get('cte_origem'),
+                'cod_emissor': rec.get('cod_emissor'),
+                'erro': erro_msg
+            }
+            error_items.append(error_record)
+    
+    return mesclado, error_items

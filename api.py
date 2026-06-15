@@ -5,9 +5,23 @@ import io
 from datetime import datetime
 from pydantic import BaseModel
 import os
+from dotenv import load_dotenv
 import tempfile
 import logging
-from services import process_excel_data, merge_notas_descargas, download_excel_from_url, delete_file
+import smtplib
+import ssl
+import asyncio
+from services import (
+    process_excel_data,
+    merge_notas_descargas,
+    download_excel_from_url,
+    delete_file,
+        generate_mesclado_and_errors,
+        format_mesclado_records,
+        excel_bytes_from_records,
+        build_filename,
+)
+from emailer import Emailer
 
 # Configurar logging
 logging.basicConfig(
@@ -22,6 +36,10 @@ app = FastAPI(title="Descarga API", version="1.0.0")
 class URLDownloadRequest(BaseModel):
     """Modelo para requisição de download via URL"""
     url: str
+
+
+# Carregar variáveis de ambiente de .env quando executado localmente
+load_dotenv()
 
 
 @app.post("/api/descargas-mescladas")
@@ -166,6 +184,79 @@ async def upload_and_return_headers(file: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"Status 500 error: Erro ao processar upload: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao processar upload: {str(e)}")
+
+
+@app.post("/api/descargas-mescladas-email")
+async def get_descargas_mescladas_and_email(data: dict):
+    """
+    Recebe JSON com 'notas', 'itens', 'nome_arquivo' e dados SMTP:
+
+    {
+      "notas": [...],
+      "itens": [...],
+      "nome_arquivo": "arquivo_xpto",
+      "smtp": {
+         "host": "smtp.example.com",
+         "port": 587,
+         "user": "user",
+         "password": "pass",
+         "use_ssl": false,
+         "starttls": true
+      },
+      "from_email": "from@example.com",
+      "to_emails": ["to1@example.com"],
+      "subject": "Assunto opcional"
+    }
+
+    Gera o XLSX, envia por SMTP com um template HTML e lista os itens com erro.
+    """
+    try:
+        if not data:
+            logger.warning("Status 400 error: Payload JSON não fornecido ou inválido")
+            raise HTTPException(status_code=400, detail="Payload JSON não fornecido ou inválido")
+
+        if 'notas' not in data or 'itens' not in data:
+            logger.warning('Status 400 error: O JSON deve conter as chaves "notas" e "itens"')
+            raise HTTPException(status_code=400, detail='O JSON deve conter as chaves "notas" e "itens"')
+
+        nome_arquivo = data.get('nome_arquivo')
+        if not nome_arquivo or str(nome_arquivo).strip() == '':
+            logger.warning('Status 400 error: nome_arquivo não fornecido ou inválido')
+            raise HTTPException(status_code=400, detail='nome_arquivo não fornecido ou inválido')
+
+        # Construir Emailer a partir do payload (ele fará fallback para
+        # variáveis de ambiente quando necessário). Não carregar env aqui.
+        smtp_conf = data.get('smtp') or None
+        from_email = data.get('from_email')
+        to_emails = data.get('to_emails')
+        subject = data.get('subject')
+
+        # Mesclar dados, identificar erros e gerar XLSX em bytes via services
+        mesclado, error_items = generate_mesclado_and_errors(data)
+
+        # Formatar registros para as colunas requeridas e gerar o XLSX
+        records_for_excel = format_mesclado_records(mesclado)
+        excel_bytes = excel_bytes_from_records(records_for_excel)
+        filename = build_filename(nome_arquivo)
+
+        # Preparar Emailer (ele monta a mensagem e realiza o envio)
+        emailer = Emailer(from_email=from_email, to_emails=to_emails, subject=subject, smtp_conf=smtp_conf)
+        total_records = len(mesclado)
+        await emailer.send(filename=filename, attachment_bytes=excel_bytes, error_items=error_items, total_records=total_records)
+
+        return JSONResponse(content={
+            'status': 'sent',
+            'filename': filename,
+            'recipients': to_emails,
+            'error_items': len(error_items)
+        }, status_code=200)
+
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Status 500 error: Erro ao enviar e-mail: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar e-mail: {str(e)}")
 
 
 @app.get("/api/descargas")
