@@ -63,18 +63,58 @@ def delete_file(file_path: str) -> bool:
 def process_excel_data(file_path):
     """Processa o arquivo Excel e retorna os dados estruturados"""
     
-    df_descarga = pd.read_excel(file_path, sheet_name='Base Descarga Automática')
+    # Tentar ler a folha esperada; se não existir, tentar alternativas
+    try:
+        df_descarga = pd.read_excel(file_path, sheet_name='Base Descarga Automática')
+    except Exception:
+        try:
+            df_descarga = pd.read_excel(file_path, sheet_name='Planilha1')
+        except Exception:
+            # fallback: usar a primeira planilha presente no arquivo
+            xls = pd.ExcelFile(file_path)
+            first_sheet = xls.sheet_names[0]
+            df_descarga = pd.read_excel(file_path, sheet_name=first_sheet)
     
     df_descarga.columns = df_descarga.columns.str.strip()
     df_descarga.columns = df_descarga.columns.str.replace('\xa0', '', regex=False)
+    # Helper para localizar colunas por substring e fornecer erro legível
+    def _find_col(containing: str, required: bool = True):
+        matches = [col for col in df_descarga.columns if containing in col]
+        if not matches:
+            if required:
+                raise ValueError(f"Coluna contendo '{containing}' não encontrada no arquivo. Colunas disponíveis: {list(df_descarga.columns)}")
+            return None
+        return matches[0]
 
-    col_nota = [col for col in df_descarga.columns if 'Nota Fiscal' in col][0]
-    col_cte_origem = [col for col in df_descarga.columns if 'CTe Origem' in col][0]
-    col_cte_descarga = [col for col in df_descarga.columns if 'Nº CTe da Descarga' in col][0]
-    col_vlr_cte = [col for col in df_descarga.columns if 'Valor CTe de Descarga' in col][0]
-    col_cnpj = [col for col in df_descarga.columns if 'CNPJ Emissor do CTe de Origem' in col][0]
-    col_cod_emissor = [col for col in df_descarga.columns if 'Cód. Emissor' in col][0]
-    col_num_calculo = [col for col in df_descarga.columns if 'Nº Cálculo' in col][0]
+    # Detectar se o template usa uma coluna 'Endereço' como referencia
+    detect_address_header = any('Endereço' in str(c) for c in df_descarga.columns)
+    if detect_address_header:
+        def _col_by_letter(letter: str):
+            idx = ord(letter.upper()) - 65
+            if idx < 0 or idx >= len(df_descarga.columns):
+                raise ValueError(f"Coluna por letra '{letter}' não existe no arquivo (total cols={len(df_descarga.columns)}).")
+            return df_descarga.columns[idx]
+
+        # Mapeamento fornecido pelo usuário
+        col_nota = _col_by_letter('A')
+        col_cte_origem = _col_by_letter('L')
+        col_cte_descarga = _col_by_letter('J')
+        col_vlr_cte = _col_by_letter('K')
+        col_cnpj = _col_by_letter('E')
+        col_cod_emissor = _col_by_letter('N')
+        # colunas opcionais
+        col_num_calculo = _find_col('Nº Cálculo', required=False)
+        col_error = _find_col('Erro', required=False) or _find_col('detalhe_erro', required=False)
+    else:
+        col_nota = _find_col('Nota Fiscal')
+        col_cte_origem = _find_col('CTe Origem')
+        col_cte_descarga = _find_col('Nº CTe da Descarga')
+        col_vlr_cte = _find_col('Valor CTe de Descarga')
+        col_cnpj = _find_col('CNPJ Emissor do CTe de Origem')
+        col_cod_emissor = _find_col('EMISSOR')
+        col_num_calculo = _find_col('Nº Cálculo', required=False)
+        col_error = _find_col('Erro', required=False) or _find_col('detalhe_erro', required=False)
+
     result = {
         'notas': [],
         'itens': []
@@ -98,10 +138,14 @@ def process_excel_data(file_path):
             'cte_origem': str(cte_origem)
         })
 
-    descargas_grouped = df_descarga.groupby(
-        [col_cte_descarga, col_cte_origem, col_cnpj, col_cod_emissor, col_num_calculo, col_error],
-        dropna=False
-    ).agg({
+    # Agrupar usando colunas encontradas; col_error e col_num_calculo são opcionais
+    group_cols = [col_cte_descarga, col_cte_origem, col_cod_emissor]
+    if col_num_calculo:
+        group_cols.append(col_num_calculo)
+    if col_error:
+        group_cols.append(col_error)
+
+    descargas_grouped = df_descarga.groupby(group_cols, dropna=False).agg({
         col_vlr_cte: 'sum'
     }).reset_index()
     
@@ -125,17 +169,13 @@ def process_excel_data(file_path):
             cod_emissor = int(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
         except (ValueError, TypeError):
             cod_emissor = str(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
-        try:
-            num_calculo = int(row[col_num_calculo]) if pd.notna(row[col_num_calculo]) else None
-        except (ValueError, TypeError):
-            num_calculo = str(row[col_num_calculo]) if pd.notna(row[col_num_calculo]) else None
+
         result['itens'].append({
             'cte_des': str(num_cte_da_des),
             'valor': str(vlr_cte),
             'cte_origem': str(cte_origem),
-            'cnpj_origem': str(row[col_cnpj]) if pd.notna(row[col_cnpj]) else None,
+            #'cnpj_origem': str(row[col_cnpj]) if pd.notna(row[col_cnpj]) else None,
             'cod_emissor': str(cod_emissor),
-            'num_calculo': str(num_calculo)
         })
     
     result['total_itens'] = len(result['itens'])     

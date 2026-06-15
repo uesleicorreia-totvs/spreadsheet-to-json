@@ -29,6 +29,17 @@ jobs:
           git checkout main
           git pull origin main
           docker-compose down
+          cat > .env << "EOF"
+          SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+          SMTP_HOST=${{ vars.SMTP_HOST }}
+          SMTP_PORT=${{ vars.SMTP_PORT }}
+          SMTP_USER=${{ vars.SMTP_USER }}
+          SMTP_USE_SSL=${{ vars.SMTP_USE_SSL }}
+          SMTP_STARTTLS=${{ vars.SMTP_STARTTLS }}
+          EMAIL_FROM=${{ vars.EMAIL_FROM }}
+          EMAIL_TO=${{ vars.EMAIL_TO }}
+          EMAIL_SUBJECT='Relatório de Descargas'
+          EOF
           docker-compose up -d --build
           docker image prune -f
 
