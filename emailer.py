@@ -44,8 +44,14 @@ class Emailer:
         - Tabela de detalhes: lista das notas com erro (num_nfe, cte_origem, cod_emissor, detalhe do erro)
         """
         # Resumo
-        inserted = max(total_records - len(error_items), 0) if total_records is not None else ''
-        errors_count = len(error_items)
+        # Contar erros por CTe Origem único (não por notas)
+        if error_items:
+            unique_ctes = {str(e.get('cte_origem')) for e in error_items if e.get('cte_origem') not in (None, '')}
+            errors_count = len(unique_ctes)
+        else:
+            errors_count = 0
+        
+        inserted = max(total_records - errors_count, 0) if total_records is not None else ''
 
         summary_table = f"""
         <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">
@@ -97,12 +103,20 @@ class Emailer:
         <html>
           <body>
             <p>Prezados,</p>
-            <p>Segue em anexo o relátorio da execução de descargas: <b>{filename}</b> </p>
-            <p><b>Resumo</b></p>
+            <p>Segue em anexo o relatório de execução: <b>{filename}</b> </p>
+            <p><b>Resumo CTe</b></p>
             {summary_table}
-            <p><b>Detalhes dos erros</b></p>
+            <p><b>Detalhes dos erros - Por Número de Nota</b></p>
             {details_html}
-            <p>Atenciosamente,<br/>Sistema de Descargas</p>
+            <br>
+                <table>
+                <tr>
+                    <td style="text-align:center;font-style:italic;">Total de Notas Afetadas:</td>
+                    <td> {len(rows)} </td>
+                </tr>
+              </table>
+              <br>
+            <p>Atenciosamente,<br/>Agente de Descargas</p>
           </body>
         </html>
         """

@@ -183,6 +183,7 @@ def format_mesclado_records(mesclado):
       - Status
       - Erro (pega detalhe_erro.error quando disponível)
       - Num. Calculo
+      - Data Lançamento
 
     Recebe a lista retornada por `merge_notas_descargas` e normaliza os campos.
     """
@@ -211,6 +212,29 @@ def format_mesclado_records(mesclado):
             except Exception:
                 valor = str(valor)
 
+        # formatar campo Data Lançamento se vier como string ISO (ex: 2026-06-16T10:16:00.196084Z)
+        data_lancamento_formatted = None
+        dl = rec.get('data_lancamento')
+        if dl is not None:
+            try:
+                dt = None
+                if isinstance(dl, datetime):
+                    dt = dl
+                elif isinstance(dl, str):
+                    s = dl.strip()
+                    if s.endswith('Z'):
+                        # converter Z para offset compatível com fromisoformat
+                        s = s[:-1] + '+00:00'
+                    dt = datetime.fromisoformat(s)
+
+                if dt:
+                    data_lancamento_formatted = dt.strftime('%m-%d-%Y %H:%M')
+                else:
+                    data_lancamento_formatted = dl
+            except Exception:
+                # se não conseguir parsear, manter o valor original
+                data_lancamento_formatted = dl
+
         formatted.append({
             'Nota': nota,
             'Cod. Emissor': cod_emissor,
@@ -220,7 +244,8 @@ def format_mesclado_records(mesclado):
             'Valor': valor,
             'Status': rec.get('status'),
             'Erro': erro,
-            'Num. Calculo': rec.get('num_calculo')
+            'Num. Calculo': rec.get('num_calculo'),
+            'Data Lançamento': data_lancamento_formatted
         })
 
     return formatted
