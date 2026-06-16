@@ -279,6 +279,42 @@ def excel_bytes_from_records(records) -> bytes:
     return output.getvalue()
 
 
+def upar_arquivo_sharedpoint(file_bytes: bytes, upload_url: str, filename: str = None, timeout: int = 30) -> dict:
+    """Faz upload de um arquivo (bytes) para um endpoint (ex: SharePoint) usando headers esperados.
+
+    Args:
+        file_bytes: Conteúdo do arquivo em bytes (XLSX)
+        upload_url: URL de upload (PUT)
+        filename: Nome do arquivo para usar no header Content-Disposition
+        timeout: timeout em segundos para a requisição
+
+    Returns:
+        dict: resultado com chaves: url, status_code, ok, text (parcial) ou error
+    """
+    print(f"Iniciando upload do arquivo para {upload_url} com timeout de {timeout} segundos")
+    try:
+        size = len(file_bytes) if file_bytes is not None else 0
+        name = filename or 'upload.xlsx'
+        headers = {
+            'Content-Disposition': f'attachment; filename="{name}"',
+            'Content-Length': str(size),
+            'Content-Range': f'bytes 0-{max(size-1,0)}/{size}',
+            'Accept-Ranges': 'bytes'
+        }
+
+        resp = requests.put(upload_url, data=file_bytes, headers=headers, timeout=timeout)
+
+        return {
+            'url': upload_url,
+            'status_code': getattr(resp, 'status_code', None),
+            'ok': getattr(resp, 'ok', False),
+            'text': getattr(resp, 'text', '')[:1000]
+        }
+
+    except Exception as e:
+        return {'url': upload_url, 'ok': False, 'error': str(e)}
+
+
 def generate_mesclado_and_errors(data):
     """Retorna os registros mesclados e a lista de itens com erro.
 
