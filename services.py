@@ -191,9 +191,21 @@ def format_mesclado_records(mesclado):
     for rec in mesclado:
         detalhe = rec.get('detalhe_erro') if isinstance(rec, dict) else None
         erro = None
+        # aceitar vários formatos de detalhe_erro: dict, list[e.g. [{'error': 'msg'}]], ou string
         if isinstance(detalhe, dict):
-            # prefer key 'error' inside detalhe_erro
             erro = detalhe.get('error') or detalhe.get('Erro')
+        elif isinstance(detalhe, list) and detalhe:
+            # juntar mensagens caso exista mais de uma entrada
+            msgs = []
+            for item in detalhe:
+                if isinstance(item, dict):
+                    m = item.get('error') or item.get('Erro')
+                    if m:
+                        msgs.append(str(m))
+                elif isinstance(item, str):
+                    msgs.append(item)
+            if msgs:
+                erro = '; '.join(msgs)
         elif isinstance(detalhe, str):
             erro = detalhe
 
@@ -281,28 +293,41 @@ def generate_mesclado_and_errors(data):
     for rec in mesclado:
         status = rec.get('status')
         detalhe_erro = rec.get('detalhe_erro')
-        
+
         # Verificar se há erro
         has_error = False
         erro_msg = ''
-        
+
         # Caso 1: status = 'erro'
         if status and isinstance(status, str) and status.lower() == 'erro':
             has_error = True
-        
-        # Caso 2: existe detalhe_erro com mensagem de erro
+
+        # Caso 2: existe detalhe_erro com mensagem de erro (suporta dict ou lista)
         if isinstance(detalhe_erro, dict) and detalhe_erro:
             error_text = detalhe_erro.get('error') or detalhe_erro.get('Erro')
             if error_text:
                 has_error = True
                 erro_msg = error_text
-        
+        elif isinstance(detalhe_erro, list) and detalhe_erro:
+            msgs = []
+            for item in detalhe_erro:
+                if isinstance(item, dict):
+                    m = item.get('error') or item.get('Erro')
+                    if m:
+                        msgs.append(str(m))
+                elif isinstance(item, str):
+                    msgs.append(item)
+            if msgs:
+                has_error = True
+                erro_msg = '; '.join(msgs)
+
         # Se encontrou erro, adicionar à lista
         if has_error:
             # Extrair mensagem de erro do detalhe_erro se não tiver sido extraída
-            if not erro_msg and isinstance(detalhe_erro, dict):
-                erro_msg = detalhe_erro.get('error') or detalhe_erro.get('Erro') or ''
-            
+            if not erro_msg:
+                if isinstance(detalhe_erro, dict):
+                    erro_msg = detalhe_erro.get('error') or detalhe_erro.get('Erro') or ''
+
             error_record = {
                 'num_nfe': rec.get('num_nfe'),
                 'cte_origem': rec.get('cte_origem'),

@@ -241,7 +241,9 @@ async def get_descargas_mescladas_and_email(data: dict):
 
         # Preparar Emailer (ele monta a mensagem e realiza o envio)
         emailer = Emailer(from_email=from_email, to_emails=to_emails, subject=subject, smtp_conf=smtp_conf)
-        total_records = len(mesclado)
+        # total_records deve ser o número de CTe Origem únicos
+        unique_ctes = {str(r.get('cte_origem')) for r in mesclado if r.get('cte_origem') not in (None, '')}
+        total_records = len(unique_ctes)
         await emailer.send(filename=filename, attachment_bytes=excel_bytes, error_items=error_items, total_records=total_records)
 
         return JSONResponse(content={
