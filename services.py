@@ -74,107 +74,61 @@ def process_excel_data(file_path):
             xls = pd.ExcelFile(file_path)
             first_sheet = xls.sheet_names[0]
             df_descarga = pd.read_excel(file_path, sheet_name=first_sheet)
-    
-    df_descarga.columns = df_descarga.columns.str.strip()
-    df_descarga.columns = df_descarga.columns.str.replace('\xa0', '', regex=False)
-    # Helper para localizar colunas por substring e fornecer erro legível
-    def _find_col(containing: str, required: bool = True):
-        matches = [col for col in df_descarga.columns if containing in col]
-        if not matches:
-            if required:
-                raise ValueError(f"Coluna contendo '{containing}' não encontrada no arquivo. Colunas disponíveis: {list(df_descarga.columns)}")
-            return None
-        return matches[0]
-
-    # Detectar se o template usa uma coluna 'Endereço' como referencia
-    detect_address_header = any('Endereço' in str(c) for c in df_descarga.columns)
-    if detect_address_header:
-        def _col_by_letter(letter: str):
-            idx = ord(letter.upper()) - 65
-            if idx < 0 or idx >= len(df_descarga.columns):
-                raise ValueError(f"Coluna por letra '{letter}' não existe no arquivo (total cols={len(df_descarga.columns)}).")
-            return df_descarga.columns[idx]
-
-        # Mapeamento fornecido pelo usuário
-        col_nota = _col_by_letter('A')
-        col_cte_origem = _col_by_letter('L')
-        col_cte_descarga = _col_by_letter('J')
-        col_vlr_cte = _col_by_letter('K')
-        col_cnpj = _col_by_letter('E')
-        col_cod_emissor = _col_by_letter('N')
-        # colunas opcionais
-        col_num_calculo = _find_col('Nº Cálculo', required=False)
-        col_error = _find_col('Erro', required=False) or _find_col('detalhe_erro', required=False)
-    else:
-        col_nota = _find_col('Nota Fiscal')
-        col_cte_origem = _find_col('CTe Origem')
-        col_cte_descarga = _find_col('Nº CTe da Descarga')
-        col_vlr_cte = _find_col('Valor CTe de Descarga')
-        col_cnpj = _find_col('CNPJ Emissor do CTe de Origem')
-        col_cod_emissor = _find_col('EMISSOR')
-        col_num_calculo = _find_col('Nº Cálculo', required=False)
-        col_error = _find_col('Erro', required=False) or _find_col('detalhe_erro', required=False)
-
     result = {
         'notas': [],
         'itens': []
     }
     
-
-    notas_unicas = df_descarga[[col_nota, col_cte_origem]].drop_duplicates()
+    # Agrupar por CTe Descarga, CTe Origem, CNPJ e Cod Emissor
+    group_cols = [df_descarga.iloc[:, 9], df_descarga.iloc[:, 11], df_descarga.iloc[:, 4], df_descarga.iloc[:, 13]]
+    
+    notas_unicas = df_descarga[[df_descarga.columns[0], df_descarga.columns[11]]].drop_duplicates()
     for _, row in notas_unicas.iterrows():
         try:
-            num_nfe = int(row[col_nota]) if pd.notna(row[col_nota]) else None
+            num_nfe = int(row.iloc[0]) if pd.notna(row.iloc[0]) else None
         except (ValueError, TypeError):
-            num_nfe = str(row[col_nota]) if pd.notna(row[col_nota]) else None
+            num_nfe = str(row.iloc[0]) if pd.notna(row.iloc[0]) else None
         
         try:
-            cte_origem = int(row[col_cte_origem]) if pd.notna(row[col_cte_origem]) else None
+            cte_origem = int(row.iloc[1]) if pd.notna(row.iloc[1]) else None
         except (ValueError, TypeError):
-            cte_origem = str(row[col_cte_origem]) if pd.notna(row[col_cte_origem]) else None
+            cte_origem = str(row.iloc[1]) if pd.notna(row.iloc[1]) else None
         
         result['notas'].append({
             'num_nfe': str(num_nfe),
             'cte_origem': str(cte_origem)
         })
 
-    # Agrupar usando colunas encontradas; col_error e col_num_calculo são opcionais
-    group_cols = [col_cte_descarga, col_cte_origem, col_cod_emissor]
-    if col_num_calculo:
-        group_cols.append(col_num_calculo)
-    if col_error:
-        group_cols.append(col_error)
-
-    descargas_grouped = df_descarga.groupby(group_cols, dropna=False).agg({
-        col_vlr_cte: 'sum'
+    descargas_grouped = df_descarga.groupby(by=[df_descarga.iloc[:, 9], df_descarga.iloc[:, 11], df_descarga.iloc[:, 4], df_descarga.iloc[:, 13]], dropna=False).agg({
+        df_descarga.columns[10]: 'sum'
     }).reset_index()
     
     for _, row in descargas_grouped.iterrows():
         try:
-            num_cte_da_des = int(row[col_cte_descarga]) if pd.notna(row[col_cte_descarga]) else None
+            num_cte_da_des = int(row.iloc[0]) if pd.notna(row.iloc[0]) else None
         except (ValueError, TypeError):
-            num_cte_da_des = str(row[col_cte_descarga]) if pd.notna(row[col_cte_descarga]) else None
+            num_cte_da_des = str(row.iloc[0]) if pd.notna(row.iloc[0]) else None
         
         try:
-            vlr_cte = round(float(row[col_vlr_cte]), 2) if pd.notna(row[col_vlr_cte]) else 0
+            vlr_cte = round(float(row.iloc[4]), 2) if pd.notna(row.iloc[4]) else 0
         except (ValueError, TypeError):
             vlr_cte = 0
         
         try:
-            cte_origem = int(row[col_cte_origem]) if pd.notna(row[col_cte_origem]) else None
+            cte_origem = int(row.iloc[1]) if pd.notna(row.iloc[1]) else None
         except (ValueError, TypeError):
-            cte_origem = str(row[col_cte_origem]) if pd.notna(row[col_cte_origem]) else None
+            cte_origem = str(row.iloc[1]) if pd.notna(row.iloc[1]) else None
         
         try:
-            cod_emissor = int(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
+            cod_emissor = int(row.iloc[3]) if pd.notna(row.iloc[3]) else None
         except (ValueError, TypeError):
-            cod_emissor = str(row[col_cod_emissor]) if pd.notna(row[col_cod_emissor]) else None
+            cod_emissor = str(row.iloc[3]) if pd.notna(row.iloc[3]) else None
 
         result['itens'].append({
             'cte_des': str(num_cte_da_des),
-            'valor': str(vlr_cte),
+            'valor': f"{vlr_cte:.2f}",
             'cte_origem': str(cte_origem),
-            #'cnpj_origem': str(row[col_cnpj]) if pd.notna(row[col_cnpj]) else None,
+            'cnpj_origem': str(row.iloc[2]) if pd.notna(row.iloc[2]) else None,
             'cod_emissor': str(cod_emissor),
         })
     
@@ -249,12 +203,13 @@ def format_mesclado_records(mesclado):
         cte_origem = rec.get('cte_origem') or rec.get('cteOrigem')
         cte_des = rec.get('cte_des') or rec.get('cteDes')
         valor = rec.get('valor')
-        try:
-            if valor is not None and str(valor) != '':
-                valor = float(valor)
-        except Exception:
-            # keep as-is (string) if it cannot be converted
-            pass
+        if valor is None or str(valor) == '':
+            valor = None
+        else:
+            try:
+                valor = f"{float(valor):.2f}"
+            except Exception:
+                valor = str(valor)
 
         formatted.append({
             'Nota': nota,
