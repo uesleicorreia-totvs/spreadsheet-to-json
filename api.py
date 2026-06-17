@@ -21,6 +21,7 @@ from services import (
         excel_bytes_from_records,
         build_filename,
     upar_arquivo_sharedpoint,
+        build_mesclado_for_xlsx_by_cte,
 )
 from emailer import Emailer
 
@@ -232,11 +233,11 @@ async def get_descargas_mescladas_and_email(data: dict):
         to_emails = data.get('to_emails')
         subject = data.get('subject')
 
-        # Mesclar dados, identificar erros e gerar XLSX em bytes via services
+        # Mesclar dados para identificar erros (mantemos para error_items)
         mesclado, error_items = generate_mesclado_and_errors(data)
 
-        # Formatar registros para as colunas requeridas e gerar o XLSX
-        records_for_excel = format_mesclado_records(mesclado)
+        # Gerar registros do XLSX usando o método que replica valores por nota
+        records_for_excel = build_mesclado_for_xlsx_by_cte(data)
         excel_bytes = excel_bytes_from_records(records_for_excel)
         filename = build_filename(nome_arquivo)
 

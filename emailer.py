@@ -43,6 +43,7 @@ class Emailer:
         - Tabela de resumo: quantos registros processados e quantos com erro
         - Tabela de detalhes: lista das notas com erro (num_nfe, cte_origem, cod_emissor, detalhe do erro)
         """
+        rows = []
         # Resumo
         # Contar erros por CTe Origem único (não por notas)
         if error_items:
@@ -68,10 +69,10 @@ class Emailer:
         if not error_items:
             details_html = '<p>Nenhum item com erro.</p>'
         else:
-            rows = []
+           
             for e in error_items:
                 # Usar diretamente o campo 'erro' que já vem estruturado de services.py
-                detalhe_msg = e.get('erro') or ''
+                detalhe_msg = e.get('erro') or 'num achei nada'
 
                 rows.append(
                     f"<tr>"

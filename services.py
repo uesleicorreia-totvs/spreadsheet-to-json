@@ -153,20 +153,28 @@ def merge_notas_descargas(data):
         descargas_por_cte[cte_origem].append(descarga)
 
     resultado = []
+    # Keep track of which nota CTEs exist so we can detect unmatched descargas
+    nota_ctes = set()
     for nota in notas:
-        cte_origem = nota['cte_origem']
+        cte_origem = nota.get('cte_origem')
+        nota_ctes.add(str(cte_origem))
         descargas_relacionadas = descargas_por_cte.get(cte_origem, [])
-        
+
         if descargas_relacionadas:
             for descarga in descargas_relacionadas:
                 registro = {
-                    **nota, 
-                    **descarga 
+                    **nota,
+                    **descarga
                 }
                 resultado.append(registro)
         else:
             resultado.append(nota)
-    
+
+    # Append descargas that have no matching nota (so errors on these aren't lost)
+    for descarga in descargas:
+        if str(descarga.get('cte_origem')) not in nota_ctes:
+            resultado.append(descarga)
+
     return resultado
 
 
@@ -261,6 +269,109 @@ def format_mesclado_records(mesclado):
         })
 
     return formatted
+
+
+def build_mesclado_for_xlsx_by_cte(data):
+    """Gera registros por `nota` (não por CTe) para uso no XLSX.
+
+    Para cada nota em `data['notas']` o método agrega os valores
+    do CTe de origem correspondente e replica esses valores na linha
+    da nota. Assim o número de registros retornados será igual ao
+    número de notas.
+    """
+    notas = data.get('notas', [])
+    descargas = data.get('itens', [])
+
+    # Agregar informações por CTe (mesma lógica anterior)
+    desc_by_cte = {}
+    for d in descargas:
+        cte = str(d.get('cte_origem')) if d.get('cte_origem') is not None else ''
+        desc_by_cte.setdefault(cte, []).append(d)
+
+    agg_by_cte = {}
+    for cte, descs in desc_by_cte.items():
+        valor_total = 0.0
+        cte_descs = []
+        erros = []
+        num_calculos = []
+        data_lancamentos = []
+        cod_emissores = set()
+        status = None
+        cnjps = set()
+
+        for d in descs:
+            v = d.get('valor')
+            try:
+                if v is not None and str(v) != '':
+                    valor_total += float(v)
+            except Exception:
+                pass
+
+            if d.get('cte_des'):
+                cte_descs.append(str(d.get('cte_des')))
+
+            if status is None and d.get('status'):
+                status = d.get('status')
+
+            detalhe = d.get('detalhe_erro')
+            if detalhe:
+                if isinstance(detalhe, list):
+                    for it in detalhe:
+                        if isinstance(it, dict):
+                            m = it.get('error') or it.get('Erro')
+                            if m:
+                                erros.append(str(m))
+                        elif isinstance(it, str):
+                            erros.append(it)
+                elif isinstance(detalhe, dict):
+                    m = detalhe.get('error') or detalhe.get('Erro')
+                    if m:
+                        erros.append(str(m))
+                elif isinstance(detalhe, str):
+                    erros.append(detalhe)
+
+            if d.get('num_calculo'):
+                num_calculos.append(str(d.get('num_calculo')))
+            if d.get('data_lancamento'):
+                data_lancamentos.append(str(d.get('data_lancamento')))
+            if d.get('cod_emissor'):
+                cod_emissores.add(str(d.get('cod_emissor')))
+            if d.get('cnpj_origem'):
+                cnjps.add(str(d.get('cnpj_origem')))
+
+        agg_by_cte[cte] = {
+            'CTe Descarga': ','.join(cte_descs) if cte_descs else '',
+            'Valor Total': f"{valor_total:.2f}" if valor_total else '',
+            'Status': status,
+            'Erro': '; '.join(erros) if erros else '',
+            'Cod. Emissor': ','.join(sorted(cod_emissores)) if cod_emissores else '',
+            'Num. Calculo': ','.join(num_calculos) if num_calculos else '',
+            'Data Lançamento': ','.join(data_lancamentos) if data_lancamentos else '',
+            'CNPJ': ','.join(sorted(cnjps)) if cnjps else ''
+        }
+
+    # Agora, para cada nota, gerar um registro replicando os agregados do CTe
+    records = []
+    for n in notas:
+        nota_num = n.get('num_nfe')
+        cte = str(n.get('cte_origem')) if n.get('cte_origem') is not None else ''
+
+        agg = agg_by_cte.get(cte, None)
+        record = {
+            'Nota': nota_num,
+            'Cod. Emissor': agg.get('Cod. Emissor') if agg else '',
+            'CNPJ': agg.get('CNPJ') if agg else '',
+            'CTe Origem': cte,
+            'CTe Descarga': agg.get('CTe Descarga') if agg else '',
+            'Valor Total': agg.get('Valor Total') if agg else '',
+            'Status': agg.get('Status') if agg else None,
+            'Erro': agg.get('Erro') if agg else '',
+            'Num. Calculo': agg.get('Num. Calculo') if agg else '',
+            'Data Lançamento': agg.get('Data Lançamento') if agg else ''
+        }
+        records.append(record)
+
+    return records
 
 
 def build_filename(nome_arquivo: str) -> str:
@@ -363,7 +474,8 @@ def generate_mesclado_and_errors(data):
             if not erro_msg:
                 if isinstance(detalhe_erro, dict):
                     erro_msg = detalhe_erro.get('error') or detalhe_erro.get('Erro') or ''
-
+                if isinstance(detalhe_erro, list):
+                    erro_msg = detalhe_erro[0].get('error') or detalhe_erro[0].get('Erro') or ''
             error_record = {
                 'num_nfe': rec.get('num_nfe'),
                 'cte_origem': rec.get('cte_origem'),
@@ -371,5 +483,5 @@ def generate_mesclado_and_errors(data):
                 'erro': erro_msg
             }
             error_items.append(error_record)
-    
+        
     return mesclado, error_items
