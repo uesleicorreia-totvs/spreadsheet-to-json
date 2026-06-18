@@ -249,10 +249,10 @@ async def get_descargas_mescladas_and_email(data: dict):
         await emailer.send(filename=filename, attachment_bytes=excel_bytes, error_items=error_items, total_records=total_records)
 
         upload_result = None
-        upload_url = data.get('upload_url') or data.get('uploadUrl')
-        if upload_url:
+        url_upload = data.get('url_upload') or data.get('uploadUrl')
+        if url_upload:
             try:
-                upload_result = upar_arquivo_sharedpoint(excel_bytes, upload_url, filename)
+                upload_result = upar_arquivo_sharedpoint(excel_bytes, url_upload, filename)
             except Exception as upload_exc:
                 logger.error(f"Erro ao upar arquivo para SharePoint: {str(upload_exc)}")
                 upload_result = f"Erro ao upar arquivo para SharePoint: {str(upload_exc)}"  
