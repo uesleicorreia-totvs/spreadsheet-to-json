@@ -395,6 +395,62 @@ async def health():
     """Health check endpoint"""
     return JSONResponse(content={"status": "ok"}, status_code=200)
 
+@app.post("/api/dict-to-xlsx")
+async def dict_to_xlsx(data: dict):
+    """
+    POST: Recebe um dicionário e retorna um arquivo XLSX para download.
+    
+    Payload esperado:
+    {
+        "data": [...],
+        "nome_arquivo": "arquivo_xpto"
+    }
+    
+    Retorna um arquivo .xlsx contendo os dados fornecidos.
+    """
+    try:
+        if not data or 'data' not in data or 'nome_arquivo' not in data:
+            logger.warning("Status 400 error: Payload JSON inválido")
+            raise HTTPException(status_code=400, detail="Payload JSON inválido. Deve conter 'data' e 'nome_arquivo'.")
+
+        records = data['data']
+        nome_arquivo = data['nome_arquivo']
+
+        # Converter para DataFrame e salvar em Excel na memória
+        import pandas as pd
+
+        df = pd.DataFrame(records)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Data')
+        output.seek(0)
+
+        # Calcular tamanho e Content-Range para envio via REST
+        size = output.getbuffer().nbytes
+
+        timestamp = datetime.now().strftime('%d%m%y_%H%M')
+        filename = f"{nome_arquivo}_{timestamp}.xlsx"
+
+        headers = {
+            'Content-Disposition': f'attachment; filename="{filename}"',
+            'Content-Length': str(size),
+            'Content-Range': f'bytes 0-{max(size-1,0)}/{size}',
+            'Accept-Ranges': 'bytes'
+        }
+
+        return StreamingResponse(
+            output,
+            media_type='application/octet-stream',
+            headers=headers
+        )
+
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Status 500 error: Erro ao gerar XLSX: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar XLSX: {str(e)}")
+
 
 if __name__ == '__main__':
     import uvicorn
@@ -404,6 +460,7 @@ if __name__ == '__main__':
     print("  POST /api/descargas - Recebe arquivo Excel via multipart/form-data")
     print("  POST /api/descargas-mescladas - Mescla notas com descargas")
     print("  POST /api/descargas-mescladas-xlsx - Mescla e retorna XLSX para download")
+    print("  POST /api/dict-to-xlsx - Converte dicionário para XLSX")
     print("  GET  /api/health - Health check")
     print("  GET  /docs - Documentação interativa (Swagger UI)")
     uvicorn.run(app, host="0.0.0.0", port=8082)
