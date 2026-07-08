@@ -2,6 +2,7 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 import io
+import base64
 from datetime import datetime
 from pydantic import BaseModel
 import os
@@ -452,6 +453,60 @@ async def dict_to_xlsx(data: dict):
         raise HTTPException(status_code=500, detail=f"Erro ao gerar XLSX: {str(e)}")
 
 
+@app.post("/api/dict-to-xlsx-base64")
+async def dict_to_xlsx_base64(data: dict):
+    """
+    POST: Recebe um dicionário e retorna o XLSX em base64.
+    
+    Payload esperado:
+    {
+        "data": [...],
+        "nome_arquivo": "arquivo_xpto"
+    }
+    
+    Retorna JSON com:
+    {
+        "base64": "...",
+        "nome_arquivo": "arquivo_xpto_DDMMAA_HHMM.xlsx"
+    }
+    """
+    try:
+        if not data or 'data' not in data or 'nome_arquivo' not in data:
+            logger.warning("Status 400 error: Payload JSON inválido")
+            raise HTTPException(status_code=400, detail="Payload JSON inválido. Deve conter 'data' e 'nome_arquivo'.")
+
+        records = data['data']
+        nome_arquivo = data['nome_arquivo']
+
+        # Converter para DataFrame e salvar em Excel na memória
+        import pandas as pd
+
+        df = pd.DataFrame(records)
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Data')
+        output.seek(0)
+
+        # Converter para base64
+        excel_bytes = output.getvalue()
+        base64_string = base64.b64encode(excel_bytes).decode('utf-8')
+
+        timestamp = datetime.now().strftime('%d%m%y_%H%M')
+        filename = f"{nome_arquivo}_{timestamp}.xlsx"
+
+        return JSONResponse(content={
+            'base64': base64_string,
+            'nome_arquivo': filename
+        }, status_code=200)
+
+    except HTTPException as http_exc:
+        logger.error(f"Status {http_exc.status_code} error: {http_exc.detail}")
+        raise
+    except Exception as e:
+        logger.error(f"Status 500 error: Erro ao gerar XLSX: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar XLSX: {str(e)}")
+
+
 if __name__ == '__main__':
     import uvicorn
     print("Iniciando API na porta 8000...")
@@ -461,6 +516,7 @@ if __name__ == '__main__':
     print("  POST /api/descargas-mescladas - Mescla notas com descargas")
     print("  POST /api/descargas-mescladas-xlsx - Mescla e retorna XLSX para download")
     print("  POST /api/dict-to-xlsx - Converte dicionário para XLSX")
+    print("  POST /api/dict-to-xlsx-base64 - Converte dicionário para XLSX e retorna em base64")
     print("  GET  /api/health - Health check")
     print("  GET  /docs - Documentação interativa (Swagger UI)")
     uvicorn.run(app, host="0.0.0.0", port=8082)
