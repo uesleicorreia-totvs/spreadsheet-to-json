@@ -480,6 +480,7 @@ def generate_mesclado_and_errors(data):
                 'num_nfe': rec.get('num_nfe'),
                 'cte_origem': rec.get('cte_origem'),
                 'cod_emissor': rec.get('cod_emissor'),
+                'valor': rec.get('valor'),
                 'erro': erro_msg
             }
             error_items.append(error_record)

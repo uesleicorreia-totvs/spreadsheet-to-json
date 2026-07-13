@@ -65,6 +65,47 @@ class Emailer:
         </table>
         """
 
+        # Tabela de CTes com erro (resumido por CTe único)
+        if error_items:
+            # Agrupar por CTe para evitar duplicatas e pegar cod_emissor e valor
+            cte_errors = {}
+            for e in error_items:
+                cte = str(e.get('cte_origem', ''))
+                if cte and cte not in cte_errors:
+                    cte_errors[cte] = {
+                        'cte_origem': cte,
+                        'cod_emissor': e.get('cod_emissor', ''),
+                        'valor': e.get('valor', '')
+                    }
+            
+            cte_rows = []
+            for cte, data in sorted(cte_errors.items()):
+                cte_rows.append(
+                    f"<tr>"
+                    f"<td>{data['cte_origem']}</td>"
+                    f"<td>{data['cod_emissor']}</td>"
+                    f"<td>{data['valor']}</td>"
+                    f"</tr>"
+                )
+            
+            cte_rows_html = '\n'.join(cte_rows)
+            cte_erro_table = f"""
+            <table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse;">
+              <thead>
+                <tr>
+                  <th>CTe</th>
+                  <th>Cod. Emissor</th>
+                  <th>Valor</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cte_rows_html}
+              </tbody>
+            </table>
+            """
+        else:
+            cte_erro_table = '<p>Nenhum CTe com erro.</p>'
+
         # Detalhes dos erros
         if not error_items:
             details_html = '<p>Nenhum item com erro.</p>'
@@ -72,7 +113,7 @@ class Emailer:
            
             for e in error_items:
                 # Usar diretamente o campo 'erro' que já vem estruturado de services.py
-                detalhe_msg = e.get('erro') or 'num achei nada'
+                detalhe_msg = e.get('erro') or ''
 
                 rows.append(
                     f"<tr>"
@@ -107,6 +148,8 @@ class Emailer:
             <p>Segue em anexo o relatório de execução: <b>{filename}</b> </p>
             <p><b>Resumo CTe</b></p>
             {summary_table}
+            <p><b>CTe com Erro</b></p>
+            {cte_erro_table}
             <p><b>Detalhes dos erros - Por Número de Nota</b></p>
             {details_html}
             <br>
